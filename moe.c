@@ -1,5 +1,7 @@
 #include <stdio.h>
-#include <cblas.h>
+#ifdef HAVE_CBLAS
+  #include <cblas.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -7,7 +9,9 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/time.h>
-#include <omp.h>
+#ifdef _OPENMP
+  #include <omp.h>
+#endif
 #include <sys/time.h>
 #define DEBUG 0
 
@@ -488,8 +492,23 @@ void layer_norm(float *out, float *x, float *gamma, float *beta, int size)
 // Matrix multiplication: C = A * B^T
 void matmul(float *c, float *a, float *b, int n, int d, int k)
 {
+    #ifdef HAVE_CBLAS
     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
                 n, k, d, 1.0f, a, d, b, d, 0.0f, c, k);
+    #else
+    #ifdef _OPENMP
+    #pragma omp parallel for collapse(2)
+    #endif
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < k; j++) {
+            float sum = 0.0f;
+            for (int l = 0; l < d; l++) {
+                sum += a[i * d + l] * b[j * d + l]; // b được Transpose ngầm định qua chỉ số
+            }
+            c[i * k + j] = sum;
+        }
+    }
+    #endif
 }
 
 TrainingHistory *create_training_history(int capacity)
@@ -517,7 +536,9 @@ TrainingHistory *create_training_history(int capacity)
 // Add bias
 void add_bias(float *x, float *bias, int n, int d)
 {
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
     for (int i = 0; i < n; i++)
     {
         for (int j = 0; j < d; j++)
@@ -530,7 +551,9 @@ void add_bias(float *x, float *bias, int n, int d)
 // ReLU activation
 void relu(float *x, int size)
 {
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
     for (int i = 0; i < size; i++)
     {
         if (x[i] < 0)
@@ -987,7 +1010,9 @@ void multi_head_attention(float *out, float *x, TransformerBlock *layer,
     memset(qkv, 0, seq_len * 3 * embed_dim * sizeof(float));
 
     /* ----  FUSED: LayerNorm + QKV projection  ---- */
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
     for (int t = 0; t < seq_len; t++)
     {
         /* LayerNorm in-register */
